@@ -13,6 +13,9 @@ export const GenereateReport = expressAsyncHandler(
     }
 
     const { startDate, endDate } = req.body;
+    if (isNaN(Date.parse(startDate)) || isNaN(Date.parse(endDate))) {
+      return next(new AppError("Invalid date format provided", 400));
+    }
 
     if (!startDate || !endDate) {
       return next(
@@ -57,8 +60,7 @@ export const GenereateReport = expressAsyncHandler(
         },
       },
     ]);
-console.log(monthlyReport)
- 
+    console.log(monthlyReport);
 
     // Aggregation pipeline for expense categories
     const expenseCategories = await Transaction.aggregate([
@@ -110,12 +112,49 @@ console.log(monthlyReport)
       name: item._id,
       value: item.totalAmount,
     }));
-
+    const ExpenseHeatmap = await Transaction.aggregate([
+      {
+        $match: {
+          userId: user._id,
+          date: { $gte: new Date(startDate), $lte: new Date(endDate) },
+          "category.type": "Expense",
+        },
+      },
+      {
+        $project: {
+          date: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+          time: { $dateToString: { format: "%H:%M", date: "$date" } },
+          amount: 1,
+          categoryType: "$category.name",
+        },
+      },
+      {
+        $group: {
+          _id: {
+            date: "$date",
+            time: "$time",
+          },
+          totalAmount: { $sum: "$amount" },
+          categoryType: { $first: "$categoryType" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          date: "$_id.date",
+          time: "$_id.time",
+          totalAmount: 1,
+          categoryType: 1,
+        },
+      },
+    ]);
+    console.log("test", ExpenseHeatmap);
     res.status(200).json({
       status: "success",
       data: {
         monthlyReport: formattedMonthlyReport,
         expenseCategories: formattedExpenseCategories,
+        expenseHeatmap: ExpenseHeatmap,
       },
     });
   }
