@@ -1,5 +1,4 @@
 'use client'
-
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowUpIcon, ArrowDownIcon } from 'lucide-react'
@@ -35,6 +34,7 @@ export function ExpenseSummary() {
 
     fetchExpenses()
   }, [])
+  console.log(expenses)
 
   if (isLoading) return <div>Loading...</div>
   if (error) return <div>Error: {error}</div>

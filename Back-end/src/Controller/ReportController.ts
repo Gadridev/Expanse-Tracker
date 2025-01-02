@@ -1,8 +1,10 @@
 import expressAsyncHandler from "express-async-handler";
+import { startOfMonth, endOfMonth, subMonths } from "date-fns";
 import { AuthRequest } from "./AuthController";
 import AppError from "../utils/AppError";
 import Transaction from "../Model/Transaction"; // Ensure you import the Transaction model
 import { Response, NextFunction } from "express";
+import ConvertToMonth from "../utils/ConvertToMonth";
 
 export const GenereateReport = expressAsyncHandler(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -60,7 +62,7 @@ export const GenereateReport = expressAsyncHandler(
         },
       },
     ]);
-    console.log(monthlyReport);
+    console.log("month",monthlyReport);
 
     // Aggregation pipeline for expense categories
     const expenseCategories = await Transaction.aggregate([
@@ -84,29 +86,7 @@ export const GenereateReport = expressAsyncHandler(
       },
     ]);
     // Format the monthly report
-    const formattedMonthlyReport = monthlyReport.reduce((acc, item) => {
-      const monthName = new Date(
-        item._id.year,
-        item._id.month - 1
-      ).toLocaleString("default", { month: "short" });
-      const existingMonth = acc.find((m: any) => m.name === monthName);
-
-      if (existingMonth) {
-        if (item._id.categoryType) {
-          existingMonth[item._id.categoryType.toLowerCase()] = item.totalAmount;
-        }
-      } else {
-        acc.push({
-          name: monthName,
-          [item._id.categoryType
-            ? item._id.categoryType.toLowerCase()
-            : "undefined"]: item.totalAmount,
-        });
-      }
-
-      return acc;
-    }, []);
-
+ const formattedMonthlyReport= ConvertToMonth(monthlyReport)
     // Format the expense categories
     const formattedExpenseCategories = expenseCategories.map((item) => ({
       name: item._id,
@@ -156,6 +136,100 @@ export const GenereateReport = expressAsyncHandler(
         expenseCategories: formattedExpenseCategories,
         expenseHeatmap: ExpenseHeatmap,
       },
+    });
+  }
+);
+export const DashboardService = expressAsyncHandler(
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const lastMonthStartDate = startOfMonth(subMonths(new Date(), 1));
+    const lastMonthEndDate = endOfMonth(subMonths(new Date(), 1));
+    console.log(lastMonthStartDate, lastMonthEndDate);
+    const user = req.user;
+    if (!user) {
+      return next(new AppError("User not found", 404));
+    }
+    const totalRevenueLastMonth = await Transaction.aggregate([
+      {
+        $match: {
+          userId: user._id,
+          date: { $gte: lastMonthStartDate, $lte: lastMonthEndDate },
+          "category.type": "Revenue",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: "$amount" },
+        },
+      },
+    ]);
+console.log(user._id)
+    // Calculate total expense from last month
+    const totalExpenseLastMonth = await Transaction.aggregate([
+      {
+        $match: {
+          userId: user._id,
+          date: { $gte: lastMonthStartDate, $lte: lastMonthEndDate },
+          "category.type": "Expense",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: "$amount" },
+        },
+      },
+    ]);
+    const pendingTransactionCount = await Transaction.aggregate([
+      {
+        $match: {
+          userId: user._id,
+          status: "pending",
+          date: { $gte: lastMonthStartDate, $lte: lastMonthEndDate },
+        },
+      },
+      {
+        $count: "totalPendingCount",
+      },
+    ]);
+    const monthlyExpense = await Transaction.aggregate([
+      {
+        $match: {
+          userId: user._id
+        },
+      },
+      {
+        $project: {
+          year: { $year: "$date" },
+          month: { $month: "$date" },
+          amount: 1,
+          categoryType: "Expense",
+        },
+      },
+      {
+        $group: {
+          _id: {
+            year: "$year",
+            month: "$month",
+            categoryType: "Expense",
+          },
+          totalAmount: { $sum: "$amount" },
+        },
+      },
+      {
+        $sort: {
+          "_id.year": 1,
+          "_id.month": 1,
+        },
+      },
+    ]);
+    const ExpenseByMonth = ConvertToMonth(monthlyExpense);
+    
+    
+  
+    res.status(200).json({
+      status: "success",
+      data: { totalExpenseLastMonth, totalRevenueLastMonth,pendingTransactionCount,ExpenseByMonth },
     });
   }
 );
